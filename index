@@ -1,248 +1,186 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mini Meet</title>
-  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-      font-family: Arial, sans-serif;
-    }
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Meet Lite</title>
 
-    body {
-      background: #0f172a;
-      color: white;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
 
-    header {
-      padding: 15px;
-      background: #111827;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 1px solid #1f2937;
-    }
+<style>
+body {
+  margin: 0;
+  font-family: Arial;
+  background: #0b1220;
+  color: white;
+}
 
-    h1 {
-      font-size: 22px;
-    }
+header {
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  background: #111a2e;
+  align-items: center;
+}
 
-    .controls {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
+input, button {
+  padding: 10px;
+  border-radius: 8px;
+  border: none;
+}
 
-    button, input {
-      padding: 10px 14px;
-      border-radius: 10px;
-      border: none;
-      font-size: 14px;
-    }
+button {
+  cursor: pointer;
+  background: #3b82f6;
+  color: white;
+}
 
-    button {
-      cursor: pointer;
-      background: #2563eb;
-      color: white;
-      transition: 0.2s;
-    }
+button:hover { background: #2563eb; }
 
-    button:hover {
-      background: #1d4ed8;
-    }
+#videos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 10px;
+  padding: 10px;
+}
 
-    input {
-      background: #1e293b;
-      color: white;
-      border: 1px solid #334155;
-    }
+video {
+  width: 100%;
+  border-radius: 12px;
+  background: black;
+}
 
-    #videos {
-      flex: 1;
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 15px;
-      padding: 15px;
-    }
+.controls {
+  display: flex;
+  gap: 10px;
+}
 
-    video {
-      width: 100%;
-      border-radius: 18px;
-      background: black;
-      border: 2px solid #1e293b;
-    }
-
-    .bottomBar {
-      background: #111827;
-      padding: 15px;
-      display: flex;
-      justify-content: center;
-      gap: 10px;
-      border-top: 1px solid #1f2937;
-    }
-
-    .danger {
-      background: #dc2626;
-    }
-
-    .danger:hover {
-      background: #b91c1c;
-    }
-
-    .green {
-      background: #16a34a;
-    }
-
-    .green:hover {
-      background: #15803d;
-    }
-
-    #roomInfo {
-      font-size: 14px;
-      color: #94a3b8;
-      margin-top: 5px;
-    }
-  </style>
+#status {
+  font-size: 13px;
+  opacity: 0.7;
+}
+</style>
 </head>
+
 <body>
-  <header>
-    <div>
-      <h1>Mini Meet</h1>
-      <div id="roomInfo">Not connected</div>
-    </div>
 
-    <div class="controls">
-      <input id="roomInput" placeholder="Room ID" />
-      <button onclick="joinRoom()">Join Room</button>
-      <button class="green" onclick="createRoom()">Create Room</button>
-    </div>
-  </header>
-
-  <div id="videos"></div>
-
-  <div class="bottomBar">
-    <button onclick="toggleMic()">Mic</button>
-    <button onclick="toggleCamera()">Camera</button>
-    <button class="danger" onclick="leaveCall()">Leave</button>
+<header>
+  <div>
+    <b>Meet Lite</b>
+    <div id="status">Not connected</div>
   </div>
 
-  <script>
-    let localStream;
-    let peer;
-    let currentCall;
-    let roomId = "";
-    let micEnabled = true;
-    let camEnabled = true;
+  <div class="controls">
+    <input id="roomInput" placeholder="Room ID"/>
+    <button onclick="createRoom()">Create</button>
+    <button onclick="joinRoom()">Join</button>
+  </div>
+</header>
 
-    const videos = document.getElementById("videos");
-    const roomInfo = document.getElementById("roomInfo");
+<div id="videos"></div>
 
-    async function setupMedia() {
-      localStream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
+<script>
+let peer;
+let localStream;
+let currentCalls = {};
+let myId;
 
-      addVideo(localStream, true);
-    }
+const videos = document.getElementById("videos");
+const statusEl = document.getElementById("status");
 
-    function addVideo(stream, muted = false) {
-      const video = document.createElement("video");
-      video.srcObject = stream;
-      video.autoplay = true;
-      video.playsInline = true;
-      video.muted = muted;
-      videos.appendChild(video);
-    }
+function log(msg){
+  statusEl.innerText = msg;
+}
 
-    async function createRoom() {
-      await setupMedia();
+async function getMedia(){
+  if (localStream) return;
 
-      roomId = Math.random().toString(36).substring(2, 8);
-      document.getElementById("roomInput").value = roomId;
+  localStream = await navigator.mediaDevices.getUserMedia({
+    video: true,
+    audio: true
+  });
 
-      startPeer(roomId);
+  addVideo(localStream, true, "me");
+}
 
-      history.replaceState({}, "", `#${roomId}`);
-      roomInfo.innerText = `Room: ${roomId}`;
-    }
+function addVideo(stream, muted=false, id=""){
+  if(document.getElementById("vid-"+id)) return;
 
-    async function joinRoom() {
-      roomId = document.getElementById("roomInput").value.trim();
+  const video = document.createElement("video");
+  video.id = "vid-" + id;
+  video.srcObject = stream;
+  video.autoplay = true;
+  video.playsInline = true;
+  video.muted = muted;
+  videos.appendChild(video);
+}
 
-      if (!roomId) {
-        alert("Enter room ID");
-        return;
-      }
+function startPeer(id){
+  peer = new Peer(id, {
+    host: "0.peerjs.com",
+    secure: true,
+    port: 443
+  });
 
-      await setupMedia();
+  peer.on("open", () => {
+    log("Connected: " + id);
+  });
 
-      const myId = Math.random().toString(36).substring(2, 10);
-      startPeer(myId);
+  peer.on("call", call => {
+    call.answer(localStream);
 
-      peer.on("open", () => {
-        const call = peer.call(roomId, localStream);
+    call.on("stream", remoteStream => {
+      addVideo(remoteStream, false, call.peer);
+    });
 
-        call.on("stream", remoteStream => {
-          addVideo(remoteStream);
-        });
+    currentCalls[call.peer] = call;
+  });
+}
 
-        currentCall = call;
-      });
+async function createRoom(){
+  await getMedia();
 
-      roomInfo.innerText = `Connected to: ${roomId}`;
-    }
+  const room = Math.random().toString(36).substring(2, 8);
+  document.getElementById("roomInput").value = room;
 
-    function startPeer(id) {
-      peer = new Peer(id);
+  myId = room;
+  startPeer(room);
 
-      peer.on("call", call => {
-        call.answer(localStream);
+  history.replaceState({}, "", "?room=" + room);
+  log("Room created: " + room);
+}
 
-        call.on("stream", remoteStream => {
-          addVideo(remoteStream);
-        });
+async function joinRoom(){
+  await getMedia();
 
-        currentCall = call;
-      });
-    }
+  const room = document.getElementById("roomInput").value.trim();
+  if(!room) return alert("Enter room ID");
 
-    function toggleMic() {
-      micEnabled = !micEnabled;
-      localStream.getAudioTracks()[0].enabled = micEnabled;
-    }
+  myId = Math.random().toString(36).substring(2, 10);
+  startPeer(myId);
 
-    function toggleCamera() {
-      camEnabled = !camEnabled;
-      localStream.getVideoTracks()[0].enabled = camEnabled;
-    }
+  peer.on("open", () => {
+    const call = peer.call(room, localStream);
 
-    function leaveCall() {
-      if (currentCall) currentCall.close();
-      if (peer) peer.destroy();
+    call.on("stream", remoteStream => {
+      addVideo(remoteStream, false, room);
+    });
 
-      videos.innerHTML = "";
+    currentCalls[room] = call;
+    log("Joined room: " + room);
+  });
+}
 
-      if (localStream) {
-        localStream.getTracks().forEach(track => track.stop());
-      }
+function autoJoin(){
+  const params = new URLSearchParams(location.search);
+  const room = params.get("room");
+  if(room){
+    document.getElementById("roomInput").value = room;
+  }
+}
 
-      roomInfo.innerText = "Disconnected";
-    }
+autoJoin();
+</script>
 
-    window.onload = () => {
-      const hashRoom = location.hash.replace("#", "");
-      if (hashRoom) {
-        document.getElementById("roomInput").value = hashRoom;
-      }
-    };
-  </script>
 </body>
 </html>
