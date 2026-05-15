@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Meet Lite Pro</title>
+<title>Meet Pro Full</title>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <style>
-body{margin:0;font-family:Arial;background:#0b1220;color:white;display:flex;flex-direction:column;height:100vh}
+body{margin:0;font-family:Arial;background:#0b1220;color:white;height:100vh;display:flex;flex-direction:column}
 header{display:flex;justify-content:space-between;align-items:center;padding:10px;background:#111a2e;flex-wrap:wrap;gap:10px}
 #main{display:flex;flex:1;height:calc(100vh - 60px)}
 #videos{flex:3;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;padding:10px;overflow:auto}
@@ -18,16 +18,15 @@ video{width:100%;border-radius:12px;background:black}
 input,button{padding:8px;border-radius:8px;border:none}
 button{background:#3b82f6;color:white;cursor:pointer}
 button:hover{background:#2563eb}
-small{opacity:.7}
-img,video.file{max-width:100%;border-radius:10px;margin-top:5px}
 #tools{display:flex;gap:5px;flex-wrap:wrap;padding:5px}
+img,video.file{max-width:100%;border-radius:10px;margin-top:5px}
 </style>
 </head>
 <body>
 
 <header>
 <div>
-<b>Meet Pro+</b>
+<b>Meet Pro Full</b>
 <div id="status">offline</div>
 </div>
 
@@ -36,8 +35,8 @@ img,video.file{max-width:100%;border-radius:10px;margin-top:5px}
 <input id="room" placeholder="Room ID"/>
 <button onclick="createRoom()">Create</button>
 <button onclick="joinRoom()">Join</button>
-<button onclick="capturePhoto()">📸 Photo</button>
-<button onclick="startRecord()">🎥 Record</button>
+<button onclick="toggleMic()">🎤 Mic</button>
+<button onclick="toggleCam()">📷 Cam</button>
 </div>
 </header>
 
@@ -46,12 +45,10 @@ img,video.file{max-width:100%;border-radius:10px;margin-top:5px}
 
 <div id="chat">
 <div id="messages"></div>
-
 <div id="tools">
 <input type="file" id="file" accept="image/*,video/*"/>
 <button onclick="sendFile()">Send</button>
 </div>
-
 <input id="chatInput" placeholder="Message..." onkeydown="if(event.key==='Enter')sendMsg()"/>
 </div>
 </div>
@@ -61,8 +58,10 @@ let peer;
 let localStream;
 let name="User";
 let connections={};
-let host=null;
-let recorder;
+let peers=[];
+let mic=true;
+let cam=true;
+let host=false;
 
 const videos=document.getElementById('videos');
 const messages=document.getElementById('messages');
@@ -104,13 +103,26 @@ function setupConn(conn){
 connections[conn.peer]=conn;
 
 conn.on('data',d=>{
+if(d.type==='join'){
+if(!peers.includes(d.id)) peers.push(d.id);
+connectAll();
+}
 if(d.type==='msg')showMsg(d);
 if(d.type==='file')showFile(d);
-if(d.type==='peerList')connectPeers(d.list);
 });
 }
 
 function broadcast(d){Object.values(connections).forEach(c=>c.send(d));}
+
+function connectAll(){
+peers.forEach(id=>{
+if(id!==peer.id && !connections[id]){
+const call=peer.call(id,localStream);
+call.on('stream',s=>addVideo(s,false,id));
+connections[id]=call;
+}
+});
+}
 
 async function createRoom(){
 await initMedia();
@@ -118,7 +130,9 @@ name=document.getElementById('name').value||"User";
 const room=Math.random().toString(36).substr(2,6);
 document.getElementById('room').value=room;
 host=true;
+peers.push(room);
 startPeer(room);
+log('room created');
 }
 
 async function joinRoom(){
@@ -127,25 +141,17 @@ name=document.getElementById('name').value||"User";
 const room=document.getElementById('room').value;
 if(!room)return;
 const id=Math.random().toString(36).substr(2,8);
-host=false;
 startPeer(id);
 
 peer.on('open',()=>{
 const conn=peer.connect(room);
 connections[room]=conn;
 setupConn(conn);
-conn.on('open',()=>log('joined'));
+conn.on('open',()=>{
+conn.send({type:'join',id:peer.id});
+log('joined');
 });
-}
-
-function connectPeers(list){
-list.forEach(id=>{
-if(id!==peer.id && !connections[id]){
-const c=peer.connect(id);
-connections[id]=c;
-setupConn(c);
-}}
-);
+});
 }
 
 function sendMsg(){
@@ -160,7 +166,7 @@ input.value='';
 function showMsg(d){
 const div=document.createElement('div');
 div.className='msg';
-div.innerHTML=`<b>${d.name}</b>: ${d.text||''}`;
+div.innerHTML=`<b>${d.name}</b>: ${d.text}`;
 messages.appendChild(div);
 messages.scrollTop=messages.scrollHeight;
 }
@@ -170,7 +176,7 @@ const f=document.getElementById('file').files[0];
 if(!f)return;
 const r=new FileReader();
 r.onload=()=>{
-const d={type:'file',name,file:r.result,namef:f.name};
+const d={type:'file',name,file:r.result};
 showFile(d);
 broadcast(d);
 };
@@ -180,55 +186,22 @@ r.readAsDataURL(f);
 function showFile(d){
 const div=document.createElement('div');
 div.className='msg';
-if(d.file.startsWith('data:image')){
-div.innerHTML=`<b>${d.name}</b><br><img src="${d.file}"/>`;
-}else if(d.file.startsWith('data:video')){
-div.innerHTML=`<b>${d.name}</b><br><video class='file' controls src="${d.file}"></video>`;
-}else{
-div.innerHTML=`<b>${d.name}</b><br><a download href="${d.file}">download</a>`;
-}
+if(d.file.startsWith('data:image')) div.innerHTML=`<b>${d.name}</b><br><img src='${d.file}'/>`;
+else if(d.file.startsWith('data:video')) div.innerHTML=`<b>${d.name}</b><br><video class='file' controls src='${d.file}'></video>`;
+else div.innerHTML=`<b>${d.name}</b><br><a download href='${d.file}'>file</a>`;
 messages.appendChild(div);
 }
 
-function capturePhoto(){
-const c=document.createElement('canvas');
-c.width=localStream.getVideoTracks()[0].getSettings().width||640;
-c.height=480;
-const ctx=c.getContext('2d');
-const v=document.createElement('video');
-v.srcObject=localStream;
-v.play();
-setTimeout(()=>{
-ctx.drawImage(v,0,0,c.width,c.height);
-c.toBlob(b=>{
-const r=new FileReader();
-r.onload=()=>{
-const d={type:'file',name,namef:'photo.png',file:r.result};
-showFile(d);
-broadcast(d);
-};
-r.readAsDataURL(b);
-},'image/png');
-},500);
+function toggleMic(){
+if(!localStream) return;
+mic=!mic;
+localStream.getAudioTracks()[0].enabled=mic;
 }
 
-function startRecord(){
+function toggleCam(){
 if(!localStream) return;
-recorder=new MediaRecorder(localStream);
-let chunks=[];
-recorder.ondataavailable=e=>chunks.push(e.data);
-recorder.onstop=()=>{
-const blob=new Blob(chunks,{type:'video/webm'});
-const r=new FileReader();
-r.onload=()=>{
-const d={type:'file',name,namef:'video.webm',file:r.result};
-showFile(d);
-broadcast(d);
-};
-r.readAsDataURL(blob);
-};
-recorder.start();
-setTimeout(()=>recorder.stop(),5000);
+cam=!cam;
+localStream.getVideoTracks()[0].enabled=cam;
 }
 </script>
 
