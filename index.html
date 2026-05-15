@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Meet Fixed Stable+</title>
+<title>Meet Stable+</title>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <style>
 body{margin:0;font-family:Arial;background:#0b1220;color:white;height:100vh;display:flex;flex-direction:column}
@@ -15,9 +15,15 @@ video{width:100%;border-radius:12px;background:black}
 #messages{flex:1;overflow:auto;padding:10px;font-size:14px}
 .msg{margin-bottom:8px}
 input,button{padding:8px;border-radius:8px;border:none}
-button{background:#ef4444;color:white;cursor:pointer}
-button.active{background:#22c55e}
+
+/* DEFAULT BUTTONS = BLUE */
+button{background:#3b82f6;color:white;cursor:pointer}
 button:hover{opacity:0.9}
+
+/* MIC + CAM STATES */
+button.active{background:#22c55e}   /* ON = green */
+button.off{background:#ef4444}      /* OFF = red */
+
 #tools{display:flex;gap:5px;flex-wrap:wrap;padding:5px}
 img,video.file{max-width:100%;border-radius:10px;margin-top:5px}
 </style>
@@ -36,11 +42,9 @@ img,video.file{max-width:100%;border-radius:10px;margin-top:5px}
 <button onclick="createRoom()">Create</button>
 <button onclick="joinRoom()">Join</button>
 
-<button id="micBtn" class="active" onclick="toggleMic()">🎤</button>
-<button id="camBtn" class="active" onclick="toggleCam()">📷</button>
-
-<button onclick="capturePhoto()">📸</button>
-<button onclick="recordVideo()">🎥</button>
+<button id="micBtn" class="active" onclick="toggleMic()">🎤 Mic</button>
+<button id="camBtn" class="active" onclick="toggleCam()">📷 Cam</button>
+<button id="recBtn" class="active" onclick="toggleRecord()">⏺ Record</button>
 </div>
 </header>
 
@@ -72,7 +76,9 @@ let peers=[];
 
 let mic=true;
 let cam=true;
+let recording=false;
 let recorder;
+let chunks=[];
 
 const videos=document.getElementById("videos");
 const messages=document.getElementById("messages");
@@ -80,6 +86,7 @@ const status=document.getElementById("status");
 
 const micBtn=document.getElementById("micBtn");
 const camBtn=document.getElementById("camBtn");
+const recBtn=document.getElementById("recBtn");
 
 function log(t){status.innerText=t}
 
@@ -231,8 +238,9 @@ messages.scrollTop=messages.scrollHeight;
 }
 
 // ---------------- CONTROLS ----------------
-function setMicUI(state){micBtn.classList.toggle("active",state);}
-function setCamUI(state){camBtn.classList.toggle("active",state);}
+function setMicUI(v){micBtn.classList.toggle("active",v);micBtn.classList.toggle("off",!v);}
+function setCamUI(v){camBtn.classList.toggle("active",v);camBtn.classList.toggle("off",!v);}
+function setRecUI(v){recBtn.classList.toggle("active",!v);recBtn.classList.toggle("off",v);}
 
 function toggleMic(){
 if(!stream) return;
@@ -248,38 +256,16 @@ stream.getVideoTracks()[0].enabled=cam;
 setCamUI(cam);
 }
 
-// ---------------- PHOTO ----------------
-function capturePhoto(){
+// ---------------- RECORD (TOGGLE) ----------------
+function toggleRecord(){
 if(!stream) return;
-const v=document.createElement("video");
-v.srcObject=stream;
-v.play();
 
-setTimeout(()=>{
-const c=document.createElement("canvas");
-c.width=640;c.height=480;
-const ctx=c.getContext("2d");
-ctx.drawImage(v,0,0,c.width,c.height);
-
-c.toBlob(b=>{
-const r=new FileReader();
-r.onload=()=>{
-const d={type:"file",name,file:r.result};
-showFile(d);
-sendToAll(d);
-};
-r.readAsDataURL(b);
-});
-},500);
-}
-
-// ---------------- VIDEO RECORD ----------------
-function recordVideo(){
-if(!stream) return;
+if(!recording){
+chunks=[];
 recorder=new MediaRecorder(stream);
-let chunks=[];
 
 recorder.ondataavailable=e=>chunks.push(e.data);
+
 recorder.onstop=()=>{
 const blob=new Blob(chunks,{type:"video/webm"});
 const r=new FileReader();
@@ -292,8 +278,17 @@ r.readAsDataURL(blob);
 };
 
 recorder.start();
-setTimeout(()=>recorder.stop(),5000);
+recording=true;
+setRecUI(true);
+log("recording...");
+}else{
+recorder.stop();
+recording=false;
+setRecUI(false);
+log("online");
 }
+}
+
 </script>
 
 </body>
