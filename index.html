@@ -3,183 +3,172 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Meet Lite</title>
-
+<title>Meet Lite Chat+</title>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
-
 <style>
-body {
-  margin: 0;
-  font-family: Arial;
-  background: #0b1220;
-  color: white;
-}
-
-header {
-  padding: 12px;
-  display: flex;
-  justify-content: space-between;
-  background: #111a2e;
-  align-items: center;
-}
-
-input, button {
-  padding: 10px;
-  border-radius: 8px;
-  border: none;
-}
-
-button {
-  cursor: pointer;
-  background: #3b82f6;
-  color: white;
-}
-
-button:hover { background: #2563eb; }
-
-#videos {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 10px;
-  padding: 10px;
-}
-
-video {
-  width: 100%;
-  border-radius: 12px;
-  background: black;
-}
-
-.controls {
-  display: flex;
-  gap: 10px;
-}
-
-#status {
-  font-size: 13px;
-  opacity: 0.7;
-}
+body{margin:0;font-family:Arial;background:#0b1220;color:white;display:flex;flex-direction:column;height:100vh}
+header{display:flex;justify-content:space-between;align-items:center;padding:10px;background:#111a2e;flex-wrap:wrap;gap:10px}
+#videos{flex:1;display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px;padding:10px}
+video{width:100%;border-radius:12px;background:black}
+.controls{display:flex;gap:8px;flex-wrap:wrap}
+input,button{padding:8px;border-radius:8px;border:none}
+button{background:#3b82f6;color:white;cursor:pointer}
+button:hover{background:#2563eb}
+#chat{width:300px;background:#0f172a;border-left:1px solid #1f2a44;display:flex;flex-direction:column}
+#main{display:flex;flex:1}
+#messages{flex:1;overflow:auto;padding:10px;font-size:14px}
+.msg{margin-bottom:8px}
+small{opacity:.7}
+#chat input{width:100%}
+img{max-width:100%;border-radius:10px;margin-top:5px}
 </style>
 </head>
-
 <body>
 
 <header>
-  <div>
-    <b>Meet Lite</b>
-    <div id="status">Not connected</div>
-  </div>
+<div>
+<b>Meet Chat+</b>
+<div id="status">Not connected</div>
+</div>
 
-  <div class="controls">
-    <input id="roomInput" placeholder="Room ID"/>
-    <button onclick="createRoom()">Create</button>
-    <button onclick="joinRoom()">Join</button>
-  </div>
+<div class="controls">
+<input id="name" placeholder="Name"/>
+<input id="room" placeholder="Room ID"/>
+<button onclick="createRoom()">Create</button>
+<button onclick="joinRoom()">Join</button>
+</div>
 </header>
 
+<div id="main">
 <div id="videos"></div>
+
+<div id="chat">
+<div id="messages"></div>
+<input id="chatInput" placeholder="Message..." onkeydown="if(event.key==='Enter')sendMsg()"/>
+<input type="file" id="file"/>
+<button onclick="sendFile()">Send File</button>
+</div>
+</div>
 
 <script>
 let peer;
 let localStream;
-let currentCalls = {};
-let myId;
+let connections = {};
+let name="User";
 
-const videos = document.getElementById("videos");
-const statusEl = document.getElementById("status");
+const videos=document.getElementById('videos');
+const messages=document.getElementById('messages');
+const status=document.getElementById('status');
 
-function log(msg){
-  statusEl.innerText = msg;
+function log(t){status.innerText=t}
+
+async function media(){
+if(localStream) return;
+localStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+addVideo(localStream,true,'me');
 }
 
-async function getMedia(){
-  if (localStream) return;
-
-  localStream = await navigator.mediaDevices.getUserMedia({
-    video: true,
-    audio: true
-  });
-
-  addVideo(localStream, true, "me");
+function addVideo(stream,muted,id){
+if(document.getElementById(id))return;
+const v=document.createElement('video');
+v.id=id;
+v.srcObject=stream;
+v.autoplay=true;
+v.playsInline=true;
+v.muted=muted;
+videos.appendChild(v);
 }
 
-function addVideo(stream, muted=false, id=""){
-  if(document.getElementById("vid-"+id)) return;
+function start(id){
+peer=new Peer(id,{host:"0.peerjs.com",secure:true,port:443});
 
-  const video = document.createElement("video");
-  video.id = "vid-" + id;
-  video.srcObject = stream;
-  video.autoplay = true;
-  video.playsInline = true;
-  video.muted = muted;
-  videos.appendChild(video);
+peer.on('open',()=>log('Online: '+id));
+
+peer.on('connection',conn=>setupConn(conn));
+
+peer.on('call',call=>{
+call.answer(localStream);
+call.on('stream',s=>addVideo(s,false,call.peer));
+});
 }
 
-function startPeer(id){
-  peer = new Peer(id, {
-    host: "0.peerjs.com",
-    secure: true,
-    port: 443
-  });
+function setupConn(conn){
+connections[conn.peer]=conn;
 
-  peer.on("open", () => {
-    log("Connected: " + id);
-  });
+conn.on('data',d=>{
+if(d.type==='msg')showMsg(d);
+if(d.type==='file')showFile(d);
+});
+}
 
-  peer.on("call", call => {
-    call.answer(localStream);
-
-    call.on("stream", remoteStream => {
-      addVideo(remoteStream, false, call.peer);
-    });
-
-    currentCalls[call.peer] = call;
-  });
+function broadcast(data){
+Object.values(connections).forEach(c=>c.send(data));
 }
 
 async function createRoom(){
-  await getMedia();
-
-  const room = Math.random().toString(36).substring(2, 8);
-  document.getElementById("roomInput").value = room;
-
-  myId = room;
-  startPeer(room);
-
-  history.replaceState({}, "", "?room=" + room);
-  log("Room created: " + room);
+await media();
+name=document.getElementById('name').value||"User";
+const room=Math.random().toString(36).substr(2,6);
+document.getElementById('room').value=room;
+start(room);
+history.replaceState({},'',"?room="+room);
 }
 
 async function joinRoom(){
-  await getMedia();
-
-  const room = document.getElementById("roomInput").value.trim();
-  if(!room) return alert("Enter room ID");
-
-  myId = Math.random().toString(36).substring(2, 10);
-  startPeer(myId);
-
-  peer.on("open", () => {
-    const call = peer.call(room, localStream);
-
-    call.on("stream", remoteStream => {
-      addVideo(remoteStream, false, room);
-    });
-
-    currentCalls[room] = call;
-    log("Joined room: " + room);
-  });
+await media();
+name=document.getElementById('name').value||"User";
+const room=document.getElementById('room').value;
+if(!room)return;
+const id=Math.random().toString(36).substr(2,8);
+start(id);
+peer.on('open',()=>{
+const conn=peer.connect(room);
+setupConn(conn);
+conn.on('open',()=>log('Joined '+room));
+});
 }
 
-function autoJoin(){
-  const params = new URLSearchParams(location.search);
-  const room = params.get("room");
-  if(room){
-    document.getElementById("roomInput").value = room;
-  }
+function sendMsg(){
+const input=document.getElementById('chatInput');
+if(!input.value)return;
+const data={type:'msg',name,text:input.value};
+showMsg(data);
+broadcast(data);
+input.value='';
 }
 
-autoJoin();
+function showMsg(d){
+const div=document.createElement('div');
+div.className='msg';
+div.innerHTML=`<b>${d.name}</b>: ${d.text||''}`;
+messages.appendChild(div);
+messages.scrollTop=messages.scrollHeight;
+}
+
+function sendFile(){
+const f=document.getElementById('file').files[0];
+if(!f)return;
+const r=new FileReader();
+r.onload=()=>{
+const data={type:'file',name,file:r.result,filename:f.name};
+showFile(data);
+broadcast(data);
+};
+r.readAsDataURL(f);
+}
+
+function showFile(d){
+const div=document.createElement('div');
+div.className='msg';
+div.innerHTML=`<b>${d.name}</b><br>`;
+if(d.file.startsWith('data:image')){
+div.innerHTML+=`<img src="${d.file}"/>`;
+}else{
+div.innerHTML+=`<a download="${d.filename}" href="${d.file}">Download ${d.filename}</a>`;
+}
+messages.appendChild(div);
+messages.scrollTop=messages.scrollHeight;
+}
 </script>
 
 </body>
