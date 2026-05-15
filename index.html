@@ -16,13 +16,12 @@ video{width:100%;border-radius:12px;background:black}
 .msg{margin-bottom:8px}
 input,button{padding:8px;border-radius:8px;border:none}
 
-/* DEFAULT BUTTONS = BLUE */
+/* default buttons */
 button{background:#3b82f6;color:white;cursor:pointer}
 button:hover{opacity:0.9}
 
-/* MIC + CAM STATES */
-button.active{background:#22c55e}   /* ON = green */
-button.off{background:#ef4444}      /* OFF = red */
+button.active{background:#22c55e}
+button.off{background:#ef4444}
 
 #tools{display:flex;gap:5px;flex-wrap:wrap;padding:5px}
 img,video.file{max-width:100%;border-radius:10px;margin-top:5px}
@@ -42,9 +41,10 @@ img,video.file{max-width:100%;border-radius:10px;margin-top:5px}
 <button onclick="createRoom()">Create</button>
 <button onclick="joinRoom()">Join</button>
 
-<button id="micBtn" class="active" onclick="toggleMic()">🎤 Mic</button>
-<button id="camBtn" class="active" onclick="toggleCam()">📷 Cam</button>
-<button id="recBtn" class="active" onclick="toggleRecord()">⏺ Record</button>
+<button id="micBtn" onclick="toggleMic()">🎤 Mic</button>
+<button id="camBtn" onclick="toggleCam()">📷 Cam</button>
+<button onclick="capturePhoto()">📸 Photo</button>
+<button id="recBtn" onclick="toggleRecord()">⏺ Rec</button>
 </div>
 </header>
 
@@ -74,8 +74,9 @@ let dataConns={};
 let callConns={};
 let peers=[];
 
-let mic=true;
-let cam=true;
+let mic=false;   // DEFAULT OFF
+let cam=true;    // DEFAULT ON
+
 let recording=false;
 let recorder;
 let chunks=[];
@@ -93,9 +94,15 @@ function log(t){status.innerText=t}
 // ---------------- MEDIA ----------------
 async function initMedia(){
 if(stream) return;
+
 stream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+
+// DEFAULT STATES
+stream.getAudioTracks()[0].enabled=false; // mic OFF
+stream.getVideoTracks()[0].enabled=true;  // cam ON
+
 addVideo(stream,true,"me");
-setMicUI(true);
+setMicUI(false);
 setCamUI(true);
 }
 
@@ -237,11 +244,12 @@ messages.appendChild(div);
 messages.scrollTop=messages.scrollHeight;
 }
 
-// ---------------- CONTROLS ----------------
+// ---------------- UI ----------------
 function setMicUI(v){micBtn.classList.toggle("active",v);micBtn.classList.toggle("off",!v);}
 function setCamUI(v){camBtn.classList.toggle("active",v);camBtn.classList.toggle("off",!v);}
 function setRecUI(v){recBtn.classList.toggle("active",!v);recBtn.classList.toggle("off",v);}
 
+// ---------------- CONTROLS ----------------
 function toggleMic(){
 if(!stream) return;
 mic=!mic;
@@ -256,7 +264,32 @@ stream.getVideoTracks()[0].enabled=cam;
 setCamUI(cam);
 }
 
-// ---------------- RECORD (TOGGLE) ----------------
+// ---------------- PHOTO ----------------
+function capturePhoto(){
+if(!stream) return;
+const v=document.createElement("video");
+v.srcObject=stream;
+v.play();
+
+setTimeout(()=>{
+const c=document.createElement("canvas");
+c.width=640;c.height=480;
+const ctx=c.getContext("2d");
+ctx.drawImage(v,0,0,c.width,c.height);
+
+c.toBlob(b=>{
+const r=new FileReader();
+r.onload=()=>{
+const d={type:"file",name,file:r.result};
+showFile(d);
+sendToAll(d);
+};
+r.readAsDataURL(b);
+});
+},500);
+}
+
+// ---------------- RECORD ----------------
 function toggleRecord(){
 if(!stream) return;
 
@@ -288,7 +321,6 @@ setRecUI(false);
 log("online");
 }
 }
-
 </script>
 
 </body>
