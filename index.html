@@ -1,11 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8"/>
+<meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Meet Fixed Pro</title>
+<title>Meet Stable Full</title>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
-
 <style>
 body{margin:0;font-family:Arial;background:#0b1220;color:white;height:100vh;display:flex;flex-direction:column}
 header{display:flex;justify-content:space-between;align-items:center;padding:10px;background:#111a2e;flex-wrap:wrap;gap:8px}
@@ -13,7 +12,7 @@ header{display:flex;justify-content:space-between;align-items:center;padding:10p
 #videos{flex:3;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;padding:10px;overflow:auto}
 video{width:100%;border-radius:12px;background:black}
 #chat{width:320px;background:#0f172a;border-left:1px solid #1f2a44;display:flex;flex-direction:column}
-#messages{flex:1;overflow:auto;padding:10px}
+#messages{flex:1;overflow:auto;padding:10px;font-size:14px}
 .msg{margin-bottom:8px}
 button,input{padding:8px;border-radius:8px;border:none}
 button{background:#3b82f6;color:white;cursor:pointer}
@@ -22,12 +21,11 @@ button:hover{background:#2563eb}
 img,video.file{max-width:100%;border-radius:10px;margin-top:5px}
 </style>
 </head>
-
 <body>
 
 <header>
 <div>
-<b>Meet Fixed Pro</b>
+<b>Meet Stable</b>
 <div id="status">offline</div>
 </div>
 
@@ -36,10 +34,8 @@ img,video.file{max-width:100%;border-radius:10px;margin-top:5px}
 <input id="room" placeholder="room"/>
 <button onclick="createRoom()">Create</button>
 <button onclick="joinRoom()">Join</button>
-
 <button onclick="toggleMic()">🎤</button>
 <button onclick="toggleCam()">📷</button>
-
 <button onclick="capturePhoto()">📸</button>
 <button onclick="recordVideo()">🎥</button>
 </div>
@@ -64,8 +60,10 @@ img,video.file{max-width:100%;border-radius:10px;margin-top:5px}
 let peer;
 let stream;
 let name="User";
-let calls={};
+let host=false;
+let hostId=null;
 let peers=[];
+let conns={};
 let mic=true;
 let cam=true;
 let recorder;
@@ -76,20 +74,14 @@ const status=document.getElementById("status");
 
 function log(t){status.innerText=t}
 
-// -------- MEDIA --------
 async function init(){
 if(stream) return;
-
 stream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
-
-// FIX: ensure tracks enabled
 stream.getAudioTracks()[0].enabled=true;
 stream.getVideoTracks()[0].enabled=true;
-
 addVideo(stream,true,"me");
 }
 
-// -------- VIDEO --------
 function addVideo(s,muted,id){
 if(document.getElementById(id)) return;
 const v=document.createElement("video");
@@ -101,7 +93,6 @@ v.muted=muted;
 videos.appendChild(v);
 }
 
-// -------- PEER --------
 function start(id){
 peer=new Peer(id,{host:"0.peerjs.com",secure:true,port:443});
 
@@ -109,53 +100,75 @@ peer.on("open",()=>log("online: "+id));
 
 peer.on("call",call=>{
 call.answer(stream);
+call.on("stream",s=>addVideo(s,false,call.peer));
+});
 
-call.on("stream",s=>{
-addVideo(s,false,call.peer);
+peer.on("connection",conn=>{
+conn.on("data",data=>{
+if(data.type==="join"){
+if(!peers.includes(data.id)) peers.push(data.id);
+if(host) broadcastPeers();
+connectToAll();
+}
+if(data.type==="peers"){
+peers=data.list;
+connectToAll();
+}
 });
 });
 }
 
-// -------- CONNECT ALL --------
-function connectAll(){
+function broadcastPeers(){
+Object.values(conns).forEach(c=>c.send({type:"peers",list:peers}));
+}
+
+function connectToAll(){
 peers.forEach(id=>{
-if(id!==peer.id && !calls[id]){
-const c=peer.call(id,stream);
+if(id!==peer.id && !conns[id]){
+const c=peer.connect(id);
+conns[id]=c;
 
-c.on("stream",s=>{
-addVideo(s,false,id);
+c.on("open",()=>{
+peer.call(id,stream);
 });
 
-calls[id]=c;
+c.on("data",d=>handleData(d));
 }
 });
 }
 
-// -------- ROOM --------
+function handleData(d){
+if(d.type==="msg") showMsg(d);
+if(d.type==="file") showFile(d);
+}
+
 async function createRoom(){
 await init();
 name=document.getElementById("name").value||"User";
-
 const room=Math.random().toString(36).substr(2,6);
 document.getElementById("room").value=room;
 
+host=true;
+hostId=room;
 peers.push(room);
-start(room);
 
+start(room);
+history.replaceState({},"","?room="+room);
 log("room created");
 }
 
 async function joinRoom(){
 await init();
 name=document.getElementById("name").value||"User";
-
 const room=document.getElementById("room").value;
 if(!room) return;
 
+host=false;
 start(Math.random().toString(36).substr(2,8));
 
 peer.on("open",()=>{
 const conn=peer.connect(room);
+conns[room]=conn;
 
 conn.on("open",()=>{
 conn.send({type:"join",id:peer.id});
@@ -164,90 +177,35 @@ log("joined");
 });
 }
 
-// -------- CHAT / SYNC --------
-peerSetup();
-
-function peerSetup(){
-setTimeout(()=>{
-if(!peer) return;
-peer.on("connection",conn=>{
-conn.on("data",d=>{
-if(d.type==="join"){
-if(!peers.includes(d.id)) peers.push(d.id);
-connectAll();
-}
-});
-});
-},1000);
+function sendMsg(){
+const i=document.getElementById("msg");
+if(!i.value) return;
+const d={type:"msg",name,text:i.value};
+showMsg(d);
+broadcast(d);
+i.value="";
 }
 
-// -------- TOGGLES FIXED --------
-function toggleMic(){
-if(!stream) return;
-mic=!mic;
-stream.getAudioTracks()[0].enabled=mic;
+function showMsg(d){
+const div=document.createElement("div");
+div.className="msg";
+div.innerHTML=`<b>${d.name}</b>: ${d.text}`;
+messages.appendChild(div);
+messages.scrollTop=messages.scrollHeight;
 }
 
-function toggleCam(){
-if(!stream) return;
-cam=!cam;
-stream.getVideoTracks()[0].enabled=cam;
+function broadcast(d){
+Object.values(conns).forEach(c=>c.send(d));
 }
 
-// -------- PHOTO --------
-function capturePhoto(){
-const c=document.createElement("canvas");
-c.width=640;c.height=480;
-const ctx=c.getContext("2d");
-
-const v=document.createElement("video");
-v.srcObject=stream;
-v.play();
-
-setTimeout(()=>{
-ctx.drawImage(v,0,0,c.width,c.height);
-
-c.toBlob(b=>{
-const r=new FileReader();
-r.onload=()=>{
-showFile({file:r.result,name});
-};
-r.readAsDataURL(b);
-},'image/png');
-
-},500);
-}
-
-// -------- VIDEO RECORD --------
-function recordVideo(){
-recorder=new MediaRecorder(stream);
-let chunks=[];
-
-recorder.ondataavailable=e=>chunks.push(e.data);
-
-recorder.onstop=()=>{
-const blob=new Blob(chunks,{type:"video/webm"});
-const r=new FileReader();
-
-r.onload=()=>{
-showFile({file:r.result,name});
-};
-
-r.readAsDataURL(blob);
-};
-
-recorder.start();
-setTimeout(()=>recorder.stop(),5000);
-}
-
-// -------- FILES --------
 function sendFile(){
 const f=document.getElementById("file").files[0];
 if(!f) return;
-
 const r=new FileReader();
 r.onload=()=>{
-showFile({file:r.result,name});
+const d={type:"file",name,file:r.result};
+showFile(d);
+broadcast(d);
 };
 r.readAsDataURL(f);
 }
@@ -255,25 +213,46 @@ r.readAsDataURL(f);
 function showFile(d){
 const div=document.createElement("div");
 div.className="msg";
-
-if(d.file.startsWith("data:image")){
-div.innerHTML=`<b>${d.name}</b><br><img src="${d.file}">`;
-}else if(d.file.startsWith("data:video")){
-div.innerHTML=`<b>${d.name}</b><br><video class="file" controls src="${d.file}"></video>`;
-}else{
-div.innerHTML=`<b>${d.name}</b><br><a download href="${d.file}">file</a>`;
-}
-
+if(d.file.startsWith("data:image")) div.innerHTML=`<b>${d.name}</b><br><img src="${d.file}">`;
+else if(d.file.startsWith("data:video")) div.innerHTML=`<b>${d.name}</b><br><video class='file' controls src="${d.file}"></video>`;
+else div.innerHTML=`<b>${d.name}</b><br><a download href="${d.file}">file</a>`;
 messages.appendChild(div);
 }
 
-// -------- CHAT --------
-function sendMsg(){
-const i=document.getElementById("msg");
-if(!i.value) return;
+function toggleMic(){
+mic=!mic;
+stream.getAudioTracks()[0].enabled=mic;
+}
 
-messages.innerHTML+=`<div class="msg"><b>${name}</b>: ${i.value}</div>`;
-i.value="";
+function toggleCam(){
+cam=!cam;
+stream.getVideoTracks()[0].enabled=cam;
+}
+
+function capturePhoto(){
+const c=document.createElement("canvas");
+c.width=640;c.height=480;
+const ctx=c.getContext("2d");
+ctx.drawImage(document.querySelector("video"),0,0,c.width,c.height);
+c.toBlob(b=>{
+const r=new FileReader();
+r.onload=()=>showFile({type:"file",name,file:r.result});
+r.readAsDataURL(b);
+});
+}
+
+function recordVideo(){
+recorder=new MediaRecorder(stream);
+let chunks=[];
+recorder.ondataavailable=e=>chunks.push(e.data);
+recorder.onstop=()=>{
+const blob=new Blob(chunks,{type:"video/webm"});
+const r=new FileReader();
+r.onload=()=>showFile({type:"file",name,file:r.result});
+r.readAsDataURL(blob);
+};
+recorder.start();
+setTimeout(()=>recorder.stop(),5000);
 }
 </script>
 
